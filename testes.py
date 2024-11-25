@@ -1,6 +1,4 @@
-
 import os
-import sys
 import pandas as pd
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -9,7 +7,6 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 import customtkinter as ctk
 from tkinter import ttk, messagebox
-
 
 manutencao_opcoes = ["Sim", "Não"]
 padronizado_opcoes = ["Padronizado", "Não padronizado", "Com erro", "Diferente", "Desenvolvimento"]
@@ -29,7 +26,7 @@ def get_google_sheets_service():
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)
+            flow = InstalledAppFlow.from_client_secrets_file("src/credentials.json", SCOPES)
             creds = flow.run_local_server(port=0)
         with open("token.json", "w") as token:
             token.write(creds.to_json())
@@ -190,22 +187,11 @@ def selecionar_linha(event):
         entry_comentarios.delete(0, ctk.END)
         entry_comentarios.insert(0, item_values[5])
 
-# Configuração do caminho correto para o ícone
-def resource_path(relative_path):
-    """ Retorna o caminho absoluto para recursos em uma pasta ou arquivo dentro do executável """
-    if hasattr(sys, "_MEIPASS"):
-        # Caso o código esteja sendo executado como um executável
-        return os.path.join(sys._MEIPASS, relative_path)
-    return os.path.join(os.path.abspath("."), relative_path)
-
-# Função para configurar o ícone
-icon_path = resource_path("LOGO-UEPA.ico")
-
 # Configuração da interface 
 root = ctk.CTk(fg_color="#262C40")
 root.title("Gerenciador de Sites - AMBIENTE DE TESTES")
 root.state("zoomed")  
-root.iconbitmap("LOGO-UEPA.ico")
+root.iconbitmap("src/LOGO-UEPA.ico")
 
 df = carregar_dados()
 
