@@ -1,4 +1,6 @@
+
 import os
+import sys
 import pandas as pd
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -7,10 +9,13 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 import customtkinter as ctk
 from tkinter import ttk, messagebox
+from PIL import Image, ImageTk
+
 
 manutencao_opcoes = ["Sim", "Não"]
 padronizado_opcoes = ["Padronizado", "Não padronizado", "Com erro", "Diferente", "Desenvolvimento"]
 servidor_opcoes = ["59", "115"]
+
 
 # Configurações de autenticação e planilha
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
@@ -20,17 +25,31 @@ SAMPLE_RANGE_NAME = "dados_gerais!A1:F1015"
 # Funções para autenticação e acesso ao Google Sheets
 def get_google_sheets_service():
     creds = None
-    if os.path.exists("token.json"):
-        creds = Credentials.from_authorized_user_file("token.json", SCOPES)
+    if os.path.exists(token_path):
+        creds = Credentials.from_authorized_user_file(token_path, SCOPES)
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            flow = InstalledAppFlow.from_client_secrets_file("src/credentials.json", SCOPES)
+            flow = InstalledAppFlow.from_client_secrets_file(credentials_path, SCOPES)
             creds = flow.run_local_server(port=0)
-        with open("token.json", "w") as token:
+        with open(token_path, "w") as token:
             token.write(creds.to_json())
     return build("sheets", "v4", credentials=creds)
+
+def get_file_path(filename):
+    # Verifica se o programa está sendo executado como executável
+    if getattr(sys, 'frozen', False):
+        # Caminho correto quando o script é empacotado
+        base_path = sys._MEIPASS
+    else:
+        # Caminho correto durante o desenvolvimento
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_path, filename)
+
+# Use o get_file_path para acessar os arquivos
+credentials_path = get_file_path('credentials.json')
+token_path = get_file_path('token.json')
 
 def carregar_dados():
     try:
@@ -46,25 +65,75 @@ def carregar_dados():
         messagebox.showerror("Erro", f"Erro ao carregar dados: {str(e)}")
         return pd.DataFrame(columns=["NOME DO SITE", "URL", "PADRONIZADO", "MANUTENÇÃO", "SERVIDOR", "COMENTÁRIOS"])
 
-def salvar_dados(df):
+def salvar_dados_edit(df):
 
+    selected_item = tabela.selection()
+
+    item_values = tabela.item(selected_item)["values"]
+    index = df[df["NOME DO SITE"] == item_values[0]].index[0]
+  
+    valores_originais = item_values
+
+    # Variável para controlar se a janela já está aberta
+    if hasattr(salvar_dados_edit, "janela_edicao_aberta") and salvar_dados_edit.janela_edicao_aberta:
+        return  # Se a janela já foi aberta, não faz nada
+
+
+    def confirmar_edicao():
+        janela_edicao.destroy()  
+        df.loc[index, "NOME DO SITE"] = entry_nome.get()
+        df.loc[index, "URL"] = entry_url.get()
+        df.loc[index, "PADRONIZADO"] = entry_padronizado.get()
+        df.loc[index, "MANUTENÇÃO"] = entry_manutencao.get()
+        df.loc[index, "SERVIDOR"] = entry_servidor.get()
+        df.loc[index, "COMENTÁRIOS"] = entry_comentarios.get()
+        atualizar_tabela()
+        limpar_campos()
+        messagebox.showinfo("Sucesso", "Registro editado com sucesso.")
+
+        
+
+        try:
+            service = get_google_sheets_service()
+            sheet = service.spreadsheets()
+            values = [df.columns.tolist()] + df.values.tolist()
+            body = {"values": values}
+            sheet.values().update(
+                spreadsheetId=SAMPLE_SPREADSHEET_ID,
+                range=SAMPLE_RANGE_NAME,
+                valueInputOption="RAW",
+                body=body
+            ).execute()
+            messagebox.showinfo("Sucesso", "Dados salvos na planilha do Google Sheets.")
+        except HttpError as e:
+            messagebox.showerror("Erro", f"Erro ao salvar dados: {str(e)}")
+
+    # messagebox.showinfo("Erro", "Edite um registro para salvar!")
+
+    def cancelar_edicao():
+        
+        entry_nome.delete(0, ctk.END)
+        entry_nome.insert(0, valores_originais[0])
+        entry_url.delete(0, ctk.END)
+        entry_url.insert(0, valores_originais[1])
+        entry_padronizado.set(valores_originais[2])
+        entry_manutencao.set(valores_originais[3])
+        entry_servidor.set(valores_originais[4])
+        entry_comentarios.delete(0, ctk.END)
+        entry_comentarios.insert(0, valores_originais[5])
+        janela_edicao.destroy()
+
+    janela_edicao = ctk.CTkToplevel(root)
+    janela_edicao.title("Confirmar Edição")
+    janela_edicao.transient(root) 
+    janela_edicao.lift()  # Coloca a janela de confirmação no topo, sem bloquear a interação
     
+    ctk.CTkLabel(janela_edicao, text="Tem certeza de que deseja salvar a edição?").pack(padx=10, pady=10)
+    ctk.CTkButton(janela_edicao, text="Confirmar", command=confirmar_edicao).pack(padx=10, pady=10)
+    ctk.CTkButton(janela_edicao, text="Cancelar", command=cancelar_edicao).pack(padx=10, pady=5)
 
-    try:
-        service = get_google_sheets_service()
-        sheet = service.spreadsheets()
-        values = [df.columns.tolist()] + df.values.tolist()
-        body = {"values": values}
-        sheet.values().update(
-            spreadsheetId=SAMPLE_SPREADSHEET_ID,
-            range=SAMPLE_RANGE_NAME,
-            valueInputOption="RAW",
-            body=body
-        ).execute()
-        messagebox.showinfo("Sucesso", "Dados salvos na planilha do Google Sheets.")
-    except HttpError as e:
-        messagebox.showerror("Erro", f"Erro ao salvar dados: {str(e)}")
-
+    # Marca que a janela está aberta
+    salvar_dados_edit.janela_edicao_aberta = True
 
 
 def adicionar_dado():
@@ -85,6 +154,23 @@ def adicionar_dado():
         limpar_campos()
     else:
         messagebox.showwarning("Aviso", "Preencha todos os campos obrigatórios!")
+
+    try:
+        service = get_google_sheets_service()
+        sheet = service.spreadsheets()
+        values = [df.columns.tolist()] + df.values.tolist()
+        body = {"values": values}
+        sheet.values().update(
+            spreadsheetId=SAMPLE_SPREADSHEET_ID,
+            range=SAMPLE_RANGE_NAME,
+            valueInputOption="RAW",
+            body=body
+        ).execute()
+        messagebox.showinfo("Sucesso", "Dados salvos na planilha do Google Sheets.")
+    except HttpError as e:
+        messagebox.showerror("Erro", f"Erro ao salvar dados: {str(e)}")
+
+    
 
 
 def atualizar_tabela():
@@ -137,39 +223,7 @@ def editar_dado():
     entry_comentarios.delete(0, ctk.END)
     entry_comentarios.insert(0, item_values[5])
     
-    def confirmar_edicao():
-        janela_edicao.destroy()  
-        df.loc[index, "NOME DO SITE"] = entry_nome.get()
-        df.loc[index, "URL"] = entry_url.get()
-        df.loc[index, "PADRONIZADO"] = entry_padronizado.get()
-        df.loc[index, "MANUTENÇÃO"] = entry_manutencao.get()
-        df.loc[index, "SERVIDOR"] = entry_servidor.get()
-        df.loc[index, "COMENTÁRIOS"] = entry_comentarios.get()
-        atualizar_tabela()
-        limpar_campos()
-        messagebox.showinfo("Sucesso", "Registro editado com sucesso.")
-
-    def cancelar_edicao():
-        
-        entry_nome.delete(0, ctk.END)
-        entry_nome.insert(0, valores_originais[0])
-        entry_url.delete(0, ctk.END)
-        entry_url.insert(0, valores_originais[1])
-        entry_padronizado.set(valores_originais[2])
-        entry_manutencao.set(valores_originais[3])
-        entry_servidor.set(valores_originais[4])
-        entry_comentarios.delete(0, ctk.END)
-        entry_comentarios.insert(0, valores_originais[5])
-        janela_edicao.destroy()
-
-    janela_edicao = ctk.CTkToplevel(root)
-    janela_edicao.title("Confirmar Edição")
-    janela_edicao.transient(root) 
-    janela_edicao.lift()  # Coloca a janela de confirmação no topo, sem bloquear a interação
     
-    ctk.CTkLabel(janela_edicao, text="Tem certeza de que deseja salvar a edição?").pack(padx=10, pady=10)
-    ctk.CTkButton(janela_edicao, text="Confirmar", command=confirmar_edicao).pack(padx=10, pady=10)
-    ctk.CTkButton(janela_edicao, text="Cancelar", command=cancelar_edicao).pack(padx=10, pady=5)
     
 
 
@@ -187,44 +241,115 @@ def selecionar_linha(event):
         entry_comentarios.delete(0, ctk.END)
         entry_comentarios.insert(0, item_values[5])
 
+# Configuração do caminho correto para o ícone
+def resource_path(relative_path):
+    """ Retorna o caminho absoluto para recursos em uma pasta ou arquivo dentro do executável """
+    if hasattr(sys, "_MEIPASS"):
+        # Caso o código esteja sendo executado como um executável
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
+
+
+
+# Função para configurar o ícone
+icon_path = resource_path("LOGO-UEPA.ico")
 # Configuração da interface 
 root = ctk.CTk(fg_color="#262C40")
 root.title("Gerenciador de Sites - AMBIENTE DE TESTES")
-root.state("zoomed")  
-root.iconbitmap("src/LOGO-UEPA.ico")
+root.state("zoomed")
+root.iconbitmap("LOGO-UEPA.ico")
+
 
 df = carregar_dados()
+
+# Função para mostrar ou esconder o placeholder
+def toggle_placeholder(event, entry, placeholder_text, is_focused):
+    if is_focused:
+        # Remover placeholder quando o campo ganha foco
+        if entry.get() == placeholder_text:
+            entry.delete(0, "end")
+            entry.configure(fg_color="#C3CDEA", text_color="black")
+    else:
+        # Adicionar placeholder quando o campo perde foco e está vazio
+        if entry.get() == "":
+            entry.insert(0, placeholder_text)
+            entry.configure(fg_color="#C3CDEA", text_color="gray")
+
+placeholder = "Pesquisar sites"
 
 search_frame = ctk.CTkFrame(root, fg_color="#8093F1")
 search_frame.pack(pady=30)
 
 search_var = ctk.StringVar()
-search_label = ctk.CTkLabel(search_frame, text="Buscar:", text_color="white")
-search_label.pack(side="left", padx=10)
-search_entry = ctk.CTkEntry(search_frame, textvariable=search_var, width=200)
+search_entry = ctk.CTkEntry(search_frame, textvariable=search_var, width=400)
 search_entry.pack(side="left")
 search_entry.bind("<KeyRelease>", lambda event: filtrar_tabela(search_var, df, tabela))
 
 search_entry.configure(
-    fg_color="#C3CDEA",  # Cor de fundo do combo box
-    text_color="black",  # Cor do texto
-    font=("Arial", 12),  # Fonte do texto
-    border_width=2,  # Largura da borda
-    border_color="#3550E9"  # Cor da borda
+    fg_color="#C3CDEA",
+    text_color="gray",  # Inicialmente cinza para o placeholder
+    font=("Arial", 12),
+    border_width=2,
+    border_color="#3550E9"
 )
+
+search_entry.insert(0, placeholder)
+
+search_entry.bind("<FocusIn>", lambda event: toggle_placeholder(event, search_entry, placeholder, True))
+search_entry.bind("<FocusOut>", lambda event: toggle_placeholder(event, search_entry, placeholder, False))
+
+# Ícone de lupa (usar PIL para carregar imagem)
+icon_path = "lupa.png"  # Substitua pelo caminho da sua imagem de lupa
+icon = Image.open(icon_path).resize((20, 20))  # Redimensione conforme necessário
+icon = ImageTk.PhotoImage(icon)
+
+# Label para exibir o ícone
+icon_label = ctk.CTkLabel(search_frame, image=icon, text="")
+icon_label.pack(side="left", padx=10)
 
 
 style = ttk.Style()
 style.theme_use("default")
-style.configure("Treeview", background="#A3AFF5", foreground="black", fieldbackground="#A3AFF5", font=("Arial", 12)) 
+style.configure("Treeview", background="#262C40", foreground="white", fieldbackground="#262C40", font=("Arial", 12)) 
 style.configure("Treeview.Heading", background="#8093F1", foreground="white", font=("Arial", 14, "bold"))
 style.map("Treeview", background=[("selected", "#5A70ED")], foreground=[("selected", "black")])
 style.map("Treeview.Heading", background=[("active", "#8093F1")], foreground=[("active", "white")])
+style.configure("Treeview", rowheight=40)  # Ajusta a altura de todas as linhas
 
 tabela = ttk.Treeview(root, columns=["NOME DO SITE", "URL", "STATUS", "MANUTENÇÃO", "SERVIDOR", "COMENTÁRIOS"], show="headings", height=15)
 
+# Configurar colunas com largura fixa
+colunas = [
+    ("NOME DO SITE", 200),
+    ("URL", 400),
+    ("STATUS", 150),
+    ("MANUTENÇÃO", 200),
+    ("SERVIDOR", 150),
+    ("COMENTÁRIOS", 200),
+]
 
-tabela.pack(side="top", fill="none", expand=False)
+for col, width in colunas:
+    tabela.heading(col, text=col)  # Configurar cabeçalhos
+    tabela.column(col, width=width, anchor="center", stretch=False, minwidth=width)  # Desabilita redimensionamento
+
+
+
+
+
+# Função para bloquear o redimensionamento
+def bloquear_redimensionamento(event):
+    return "break"  # Impede o redimensionamento da coluna
+
+# Bind de redimensionamento da coluna
+tabela.bind("<Button-1>", bloquear_redimensionamento)  # Impede o redimensionamento de colunas
+
+def selecionar_linha(event):
+    item = tabela.selection()  
+    if item:
+        print(f"Selecionado: {tabela.item(item)['values']}")
+
+tabela.bind("<Button-1>", selecionar_linha) 
+tabela.pack(side="left", fill="both", expand=False, padx=(5, 0))
 
 
 for col in tabela["columns"]:
@@ -233,14 +358,14 @@ for col in tabela["columns"]:
 atualizar_tabela()
 
 
-tabela.bind("<ButtonRelease-1>", selecionar_linha)
+
 
 
 
 
 
 frame_campos = ctk.CTkFrame(root, fg_color="#8093F1")
-frame_campos.pack(side="top", fill="none", expand=False, pady=20)
+frame_campos.pack(side="top", fill="none", expand=False, padx=20, pady=(150, 0))
 
 ctk.CTkLabel(frame_campos, text="Nome do site:", text_color="white").grid(row=0, column=0, padx=10, pady=5, sticky="e")
 entry_nome = ctk.CTkEntry(frame_campos)
@@ -329,9 +454,9 @@ entry_comentarios.configure(
 frame_botoes = ctk.CTkFrame(root, fg_color="#262C40")
 frame_botoes.pack(pady=10)
 
-ctk.CTkButton(frame_botoes, fg_color="#8093F1", hover_color="#5A70ED", text="Adicionar", command=adicionar_dado).grid(row=0, column=0, padx=10)
-ctk.CTkButton(frame_botoes, fg_color="#8093F1", hover_color="#5A70ED", text="Editar", command=editar_dado).grid(row=0, column=1, padx=10)
-ctk.CTkButton(frame_botoes, fg_color="#8093F1", hover_color="#5A70ED", text="Salvar", command=lambda: salvar_dados(df)).grid(row=0, column=2, padx=10)
-ctk.CTkButton(frame_botoes, fg_color="#8093F1", hover_color="#5A70ED", text="Limpar campos", command=lambda: limpar_campos()).grid(row=0, column=3, padx=10)
+ctk.CTkButton(frame_botoes, fg_color="#8093F1", hover_color="#5A70ED", text="Adicionar", command=adicionar_dado).grid(row=0, column=0, pady=10)
+ctk.CTkButton(frame_botoes, fg_color="#8093F1", hover_color="#5A70ED", text="Editar", command=editar_dado).grid(row=1, column=0, pady=10)
+ctk.CTkButton(frame_botoes, fg_color="#8093F1", hover_color="#5A70ED", text="Salvar edição", command=lambda: salvar_dados_edit(df)).grid(row=2, column=0, pady=10)
+ctk.CTkButton(frame_botoes, fg_color="#8093F1", hover_color="#5A70ED", text="Limpar campos", command=lambda: limpar_campos()).grid(row=3, column=0, pady=10)
 
 root.mainloop()

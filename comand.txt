@@ -1,0 +1,9 @@
+& "C:\Users\diego.amorim\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\Scripts\pyinstaller.exe" `
+    --noconfirm `
+    --log-level=WARN `
+    --nowindow `
+    --add-data "credentials.json;." `
+    --add-data "lupa.png;." `
+    --add-data "LOGO-UEPA.ico;." `
+    main.py
+
